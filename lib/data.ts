@@ -4,6 +4,16 @@ export type Agency={name:string;address:Address;location:{latitude:number|null;l
 export type Organisation={code:number;title:string;branch:string;branchCode:string;activity:string;name:string;phone:string;email:string;homepage:string;info:string;address:Address;owner:{title:string;address:Address};agencies:Agency[];slots:Slot[]};
 export type Dataset={content:Organisation[];totalCount:number;lastUpdated:number;source?:string};
 export type Place={id:string;org:Organisation;agency:Agency;lat:number|null;lng:number|null;search:string};
+export type PlaceGroup={org:Organisation;places:Place[]};
+export function groupPlaces(places:Place[]):PlaceGroup[]{
+  const groups=new Map<number,PlaceGroup>();
+  for(const place of places){
+    let group=groups.get(place.org.code);
+    if(!group){group={org:place.org,places:[]};groups.set(place.org.code,group);}
+    group.places.push(place);
+  }
+  return [...groups.values()];
+}
 export type Filters={query:string;region:string;branch:string;from:string;until:string;freeOnly:boolean};
 export const regions:Record<string,string>={BURGENLAND:'Burgenland',CARINTHIA:'Kärnten',LOWER_AUSTRIA:'Niederösterreich',UPPER_AUSTRIA:'Oberösterreich',SALZBURG:'Salzburg',STYRIA:'Steiermark',TYROL:'Tirol',VORARLBERG:'Vorarlberg',VIENNA:'Wien'};
 export const categories:Record<string,string>={'1':'Krankenanstalten','2':'Rettungswesen','3a':'Sozialhilfe','3b':'Behindertenhilfe','3c':'Landwirtschaftliche Hilfe','3d':'Altenbetreuung','3e':'Gesundheit & Krankenbetreuung','3f':'Suchtbetreuung','3g':'Justizanstalten','4':'Flüchtlingsbetreuung','5':'Katastrophenhilfe & Zivilschutz','6a':'Zivile Landesverteidigung','6b':'Öffentliche Sicherheit','6c':'Gedenkstätten','6d':'Umweltschutz','6e':'Jugendarbeit','6f':'Kinderbetreuung','6g':'Integration & Beratung'};
