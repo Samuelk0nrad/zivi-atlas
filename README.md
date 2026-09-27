@@ -6,11 +6,11 @@ A map for finding Austrian Zivildienst placements and keeping track of applicati
 
 - Search Einrichtungen and Einsatzorte on a map, with filters for dates, availability, activity and region.
 - Save institutions to collections and add personal colored labels.
-- Browse email drafts by institution, attach documents and open a composer in Gmail or another email app.
+- Browse email drafts by institution, attach documents and create Gmail draft copies including attachments after Google authorization.
 - Track application status and review imported sent emails and replies.
 - Manage collections, labels, drafts, attachments and applications from ChatGPT through an authenticated MCP connection.
 
-Email composer links do not send mail. Attachments can be downloaded or exported with a draft as an `.eml` file; Gmail composer links transfer text only. Gmail history is imported on request through ChatGPT and a separately connected Gmail tool. There is no automatic Gmail synchronization.
+The optional [Gmail connection](docs/gmail-setup.md) creates unsent drafts with the saved attachment bytes. It requires a Google OAuth web client ID; Google access tokens stay in browser memory. The app never sends mail. The text-only composer fallback and `.eml` export remain available. Gmail history is imported on request through ChatGPT and a separately connected Gmail tool. There is no automatic Gmail synchronization.
 
 ## Run locally
 

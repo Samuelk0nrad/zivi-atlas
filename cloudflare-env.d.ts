@@ -4,5 +4,6 @@ declare namespace Cloudflare {
     BUCKET?: R2Bucket;
     COLLECTIONS_MCP_TOKEN_SHA256?: string;
     COLLECTIONS_MCP_OWNER_ID?: string;
+    GOOGLE_GMAIL_CLIENT_ID?: string;
   }
 }

@@ -6,6 +6,8 @@ import {draftActionSchema,draftLinks,type DraftAction,type DraftFields,type Draf
 import {draftTools} from '@/lib/draft-tools';
 import {attachmentTools,MAX_ATTACHMENT_BYTES} from '@/lib/attachment-contract';
 import {type Organisation} from '@/lib/data';
+import {useGmailConnection,GmailSetup} from './gmail-connection';
+import {createGmailCopy,GmailHandoffError,gmailDraftsUrl,type GmailCopy} from '@/lib/gmail';
 
 type DraftResult={draft?:EmailDraft;drafts?:DraftSummary[];total?:number;error?:string;[key:string]:unknown};
 export function useDrafts(){
@@ -57,11 +59,14 @@ const isDirty=(editor:Editor|null)=>!!editor&&(editor.saved?(['recipient','subje
 
 export function DraftsDialog({model,open,onOpenChange,organisation,initialDraftId,onApplications}:{onApplications:()=>void;model:DraftsModel;open:boolean;onOpenChange:(open:boolean)=>void;organisation:Organisation|null;initialDraftId:string|null}){
   const[editor,setEditor]=useState<Editor|null>(null),[showAll,setShowAll]=useState(false),[query,setQuery]=useState(''),[pending,setPending]=useState<(()=>void)|null>(null),[deleting,setDeleting]=useState(false),[notice,setNotice]=useState(''),[loadingDraft,setLoadingDraft]=useState(false),[attaching,setAttaching]=useState(false),[chooseSaved,setChooseSaved]=useState(false),[savedAttachments,setSavedAttachments]=useState<import('@/lib/attachment-contract').DraftAttachment[]>([]);
+  const gmail=useGmailConnection(open);
+  const[gmailBusy,setGmailBusy]=useState(false),[gmailCopies,setGmailCopies]=useState<Record<string,GmailCopy>>({}),[gmailCheckUrl,setGmailCheckUrl]=useState('');
+  const gmailWorking=useRef(false);
   const fileInput=useRef<HTMLInputElement>(null);
-  const loadSerial=useRef(0),dirty=isDirty(editor),disabled=model.busy||loadingDraft||attaching;
+  const loadSerial=useRef(0),dirty=isDirty(editor),disabled=model.busy||loadingDraft||attaching||gmailBusy;
   const summary=editor?.saved?model.drafts.find(d=>d.id===editor.saved!.id):undefined;
   const changedElsewhere=!!editor?.saved&&!!summary&&summary.revision>editor.saved.revision;
-  const resetMessages=()=>{model.setError('');setNotice('');setDeleting(false);setChooseSaved(false);};
+  const resetMessages=()=>{model.setError('');setNotice('');setDeleting(false);setChooseSaved(false);setGmailCheckUrl('');};
   const load=async(id:string)=>{const version=++loadSerial.current;setLoadingDraft(true);resetMessages();try{const value=await model.invoke('get_email_draft',{draftId:id});if(version===loadSerial.current&&value.draft)setEditor(fromDraft(value.draft));}catch{}finally{if(version===loadSerial.current)setLoadingDraft(false);}};
   const newDraft=(org:Organisation|null)=>{resetMessages();setEditor({saved:null,organisationCode:org?.code??null,organisationTitle:org?.title||'',recipient:org?.email||'',subject:org?`Anfrage zum Zivildienst – ${org.title}`.slice(0,200).replace(/[\r\n\x00]/g,' '):'',body:org?'Guten Tag,\n\nich interessiere mich für einen Zivildienst bei Ihrer Einrichtung.\n\n\nMit freundlichen Grüßen\n':''});};
   const guard=(action:()=>void)=>{if(disabled)return;if(dirty)setPending(()=>action);else action();};
@@ -87,18 +92,27 @@ export function DraftsDialog({model,open,onOpenChange,organisation,initialDraftI
   const savedFiles=async()=>{try{const r=await model.invoke('list_draft_attachments',{});setSavedAttachments((r.attachments as import('@/lib/attachment-contract').DraftAttachment[]||[]).filter(f=>f.draftId!==editor?.saved?.id));setChooseSaved(true);}catch{}};
   const changeAttachment=async(tool:'copy_draft_attachment'|'remove_draft_attachment',attachmentId:string)=>{setAttaching(true);try{const draft=await save();if(!draft)return;const r=await model.invoke(tool,{attachmentId,draftId:draft.id,expectedRevision:draft.revision});if(r.draft){setEditor(fromDraft(r.draft));setNotice(tool==='copy_draft_attachment'?'Datei übernommen':'Anhang entfernt');setChooseSaved(false);}}catch{}finally{setAttaching(false);}};
   const downloadEmail=async()=>{const draft=await save();if(draft)window.location.href=`/api/drafts/${draft.id}/export`;};
-  const openComposer=async(kind:'gmail'|'mail')=>{
-    if(!editor)return;
-    // Reserve a user-initiated tab before the asynchronous save to avoid popup blocking.
-    const tab=kind==='gmail'?window.open('about:blank','_blank'):null;if(tab)tab.opener=null;
-    const draft=await save();if(!draft){tab?.close();return;}
-    const links=draftLinks(draft);
-    if(kind==='gmail'){if(tab)tab.location.href=links.gmailUrl;else setNotice('Gespeichert. Pop-up blockiert – über „Gmail öffnen“ erneut öffnen.');}
-    else window.location.href=links.mailtoUrl;
+  const openMail=async()=>{const draft=await save();if(draft)window.location.href=draftLinks(draft).mailtoUrl;};
+  const createInGmail=async()=>{
+    if(!editor||disabled||gmailWorking.current)return;
+    gmailWorking.current=true;setGmailBusy(true);model.setError('');setGmailCheckUrl('');setNotice('');
+    let account='';
+    try{
+      const session=await gmail.authorize();account=session.email;
+      const draft=await save();if(!draft)return;
+      const created=await createGmailCopy(session,draft);
+      setGmailCopies(current=>({...current,[draft.id]:created}));
+      setNotice(`In Gmail gespeichert · ${created.account}${created.attachmentCount?` · ${created.attachmentCount} ${created.attachmentCount===1?'Anhang':'Anhänge'}`:''}`);
+    }catch(error){
+      model.setError(error instanceof Error?error.message:'Gmail-Entwurf konnte nicht erstellt werden.');
+      if(error instanceof GmailHandoffError&&error.uncertain&&account)setGmailCheckUrl(gmailDraftsUrl(account));
+    }finally{gmailWorking.current=false;setGmailBusy(false);}
   };
   const copy=async()=>{if(!editor)return;try{await navigator.clipboard.writeText(`An: ${editor.recipient}\nBetreff: ${editor.subject}\n\n${editor.body}`);setNotice('Entwurf kopiert');}catch{setNotice('Kopieren nicht möglich. Bitte den Text im Entwurf markieren und kopieren.');}};
   const field=(key:keyof DraftFields,value:string)=>{setEditor(current=>current?{...current,[key]:value}:null);setNotice('');};
   const links=editor?.saved&&!dirty?draftLinks(editor.saved):null;
+  const gmailCopy=editor?.saved?gmailCopies[editor.saved.id]:undefined;
+  const currentGmailCopy=gmailCopy&&!dirty&&gmailCopy.revision===editor?.saved?.revision?gmailCopy:null;
   return <Dialog open={open} onOpenChange={value=>{if(!value)close();}}><DialogContent aria-describedby={organisation?'drafts-context':undefined} className={'drafts-dialog drafts-browser '+(editor||loadingDraft?'is-editing':'is-browsing')} showCloseButton={false}>
     <header className="drafts-heading"><div><DialogTitle>E-Mail-Entwürfe</DialogTitle>{organisation&&<DialogDescription id="drafts-context">{organisation.title}</DialogDescription>}</div><button className="draft-mail-app" disabled={disabled} onClick={()=>guard(onApplications)}>Bewerbungen</button><button className="close-detail" aria-label="Entwürfe schließen" onClick={close} disabled={disabled}><X size={20}/></button></header>
     {pending&&<div className="draft-prompt" role="alert"><p>Änderungen zuerst speichern?</p><div><button disabled={disabled} onClick={()=>setPending(null)}>Zurück</button><button disabled={disabled} onClick={()=>{const next=pending;setPending(null);next();}}>Verwerfen</button><button disabled={disabled} className="primary-button" onClick={async()=>{const result=await save();if(result){const next=pending;setPending(null);next();}}}>Speichern & weiter</button></div></div>}
@@ -116,7 +130,17 @@ export function DraftsDialog({model,open,onOpenChange,organisation,initialDraftI
       {editor.saved?.attachments?.map(file=><div className="draft-attachment" key={file.id}><Paperclip size={16}/><a href={file.downloadUrl} download><strong>{file.filename}</strong><small>{file.size>=1024*1024?(file.size/1024/1024).toFixed(1)+' MB':Math.ceil(file.size/1024)+' KB'}</small></a><a className="draft-icon" aria-label={`${file.filename} herunterladen`} href={file.downloadUrl} download><Download size={15}/></a><button className="draft-icon" aria-label={`${file.filename} entfernen`} disabled={disabled} onClick={()=>void changeAttachment('remove_draft_attachment',file.id)}><X size={15}/></button></div>)}
       {chooseSaved&&<div className="draft-saved-files"><div><strong>Aus einem anderen Entwurf</strong><button className="draft-icon" aria-label="Dateiauswahl schließen" onClick={()=>setChooseSaved(false)}><X size={15}/></button></div>{savedAttachments.length?savedAttachments.map(file=><button disabled={disabled} key={file.id} onClick={()=>void changeAttachment('copy_draft_attachment',file.id)}><Paperclip size={14}/><span>{file.filename}</span><Plus size={14}/></button>):<p>Noch keine Datei in einem anderen Entwurf gespeichert.</p>}</div>}
       </section>
-      {deleting?<div className="draft-prompt"><p>Diesen gespeicherten Entwurf löschen?</p><div><button disabled={disabled} onClick={()=>setDeleting(false)}>Abbrechen</button><button className="draft-danger" disabled={disabled} onClick={async()=>{if(!editor.saved)return;try{await model.execute({action:'delete_email_draft',draftId:editor.saved.id,expectedRevision:editor.saved.revision});setEditor(null);setDeleting(false);}catch{}}}>Entwurf löschen</button></div></div>:<footer className="draft-footer"><div className="draft-save-row"><span className="draft-status" role="status">{model.busy?<><Loader2 size={14} className="spin"/>Wird gespeichert…</>:notice||(!dirty&&editor.saved?<><Check size={14}/>Gespeichert</>:'Nicht gespeichert')}</span><button className="draft-icon" aria-label="Entwurf kopieren" title="Kopieren" onClick={copy}><Copy size={16}/></button>{editor.saved&&<button className="draft-icon draft-danger" aria-label="Entwurf löschen" title="Löschen" disabled={disabled} onClick={()=>setDeleting(true)}><Trash2 size={16}/></button>}<button className="draft-save" disabled={disabled||(!dirty&&!!editor.saved)} onClick={()=>void save()}><Save size={16}/>Speichern</button></div><div className="draft-send-row">{(editor.saved?.attachments?.length||0)>0&&<button className="draft-mail-app" disabled={disabled} onClick={()=>void downloadEmail()}><Download size={15}/>E-Mail-Datei (.eml)</button>}{links&&!disabled?<><a className="draft-mail-app" href={links.mailtoUrl}><Mail size={16}/>Mail-App</a><a className="primary-button" href={links.gmailUrl} target="_blank" rel="noopener noreferrer">Gmail öffnen<ArrowUpRight size={17}/></a></>:<><button className="draft-mail-app" disabled={disabled} onClick={()=>void openComposer('mail')}><Mail size={16}/>Mail-App</button><button className="primary-button" disabled={disabled} onClick={()=>void openComposer('gmail')}>Speichern & Gmail öffnen<ArrowUpRight size={17}/></button></>}</div>{(editor.saved?.attachments?.length||0)>0&&<p className="draft-footnote">Anhänge bitte in Gmail oder der Mail-App hinzufügen.</p>}</footer>}
+      {deleting?<div className="draft-prompt"><p>Diesen gespeicherten Entwurf löschen?</p><div><button disabled={disabled} onClick={()=>setDeleting(false)}>Abbrechen</button><button className="draft-danger" disabled={disabled} onClick={async()=>{if(!editor.saved)return;try{await model.execute({action:'delete_email_draft',draftId:editor.saved.id,expectedRevision:editor.saved.revision});setEditor(null);setDeleting(false);}catch{}}}>Entwurf löschen</button></div></div>:<footer className="draft-footer"><div className="draft-save-row"><span className="draft-status" role="status">{gmailBusy?<><Loader2 size={14} className="spin"/>Gmail-Entwurf wird erstellt…</>:model.busy?<><Loader2 size={14} className="spin"/>Wird gespeichert…</>:notice||(!dirty&&editor.saved?<><Check size={14}/>Gespeichert</>:'Nicht gespeichert')}</span><button className="draft-icon" aria-label="Entwurf kopieren" title="Kopieren" onClick={copy}><Copy size={16}/></button>{editor.saved&&<button className="draft-icon draft-danger" aria-label="Entwurf löschen" title="Löschen" disabled={disabled} onClick={()=>setDeleting(true)}><Trash2 size={16}/></button>}<button className="draft-save" disabled={disabled||(!dirty&&!!editor.saved)} onClick={()=>void save()}><Save size={16}/>Speichern</button></div><div className="draft-send-row">{(editor.saved?.attachments?.length||0)>0&&<button className="draft-mail-app" disabled={disabled} onClick={()=>void downloadEmail()}><Download size={15}/>E-Mail-Datei (.eml)</button>}{links&&!disabled?<a className="draft-mail-app" href={links.mailtoUrl}><Mail size={16}/>Mail-App</a>:<button className="draft-mail-app" disabled={disabled} onClick={()=>void openMail()}><Mail size={16}/>Mail-App</button>}
+        {currentGmailCopy?<a className="primary-button" href={currentGmailCopy.url} target="_blank" rel="noopener noreferrer">In Gmail öffnen<ArrowUpRight size={17}/></a>:<button className="primary-button" disabled={disabled||!gmail.ready} onClick={()=>void createInGmail()}>{gmailBusy?<Loader2 size={16} className="spin"/>:<Mail size={16}/>} {gmail.loading?'Gmail wird geladen…':gmailCopy?'Neue Gmail-Kopie erstellen':'Gmail-Entwurf erstellen'}</button>}
+      </div>
+      {gmail.error&&<p className="gmail-connection-error" role="alert">{gmail.error} <button onClick={gmail.retry} disabled={disabled}>Erneut versuchen</button></p>}
+      {!gmail.loading&&!gmail.error&&!gmail.clientId&&<GmailSetup/>}
+      {!gmail.loading&&!gmail.ready&&links&&!disabled&&<a className="draft-mail-app" href={links.gmailUrl} target="_blank" rel="noopener noreferrer">{editor.saved?.attachments.length?'Nur Text in Gmail öffnen':'Gmail ohne Verbindung öffnen'}<ArrowUpRight size={15}/></a>}
+      {gmailCheckUrl&&<a className="draft-mail-app" href={gmailCheckUrl} target="_blank" rel="noopener noreferrer">Gmail-Entwürfe prüfen<ArrowUpRight size={15}/></a>}
+      {currentGmailCopy&&<p className="draft-footnote">Gmail-Kopie für {currentGmailCopy.account}{currentGmailCopy.attachmentCount?` · ${currentGmailCopy.attachmentCount} ${currentGmailCopy.attachmentCount===1?'Anhang':'Anhänge'}`:''}. In Gmail unter „Entwürfe“ öffnen.</p>}
+      {gmailCopy&&!currentGmailCopy&&<p className="draft-footnote">Änderungen werden als neue Gmail-Kopie gespeichert.</p>}
+      {(editor.saved?.attachments?.length||0)>0&&<p className="draft-footnote">Mail-App: Für Anhänge die E-Mail-Datei (.eml) öffnen.</p>}
+      </footer>}
     </>}</section></div>}
   </DialogContent></Dialog>;
 }

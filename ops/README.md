@@ -154,3 +154,7 @@ already uploaded file; new files use the website picker. Composer URLs transfer
 text only, so Gmail files must be attached manually. Authenticated `.eml` export
 contains actual file bytes and `X-Unsent: 1` for compatible desktop mail apps; it
 is not Gmail draft import.
+
+## Optional Gmail draft handoff
+
+See [Gmail setup](../docs/gmail-setup.md) for the public OAuth client ID and authorized origins. The browser uploads revision-checked MIME directly to Gmail after consent; no Google credential is passed to the MCP tunnel or server. The existing ChatGPT Gmail import workflow remains separate.
