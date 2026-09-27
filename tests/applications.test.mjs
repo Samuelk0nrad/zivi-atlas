@@ -41,3 +41,49 @@ test('same-millisecond retry remains a no-op and batches roll back on a raced as
  await assert.rejects(imp(db,[message({messageId:'8234567890abcdef'}),message({messageId:'7234567890abcdef'})],{organisationCode:2}),e=>e.status===409);
  assert.equal((await getApplication(db,'alice',{applicationId:parent.application.id})).emailTotal,0);
 });
+
+test('receipt acknowledgments can be waiting independently of received status, and summaries expose the decision',async()=>{
+ const {db}=database();let r=await imp(db);assert.equal(r.application.effectiveNextAction,'waiting');
+ r=await imp(db,[message({messageId:'a234567890abcdef',direction:'received',from:'office@example.org',to:'alice@example.org',occurredAt:'2026-09-22T07:30:00Z',body:'Wir haben Ihre Bewerbung erhalten. Bitte warten Sie auf unsere Rückmeldung.'})]);
+ assert.equal(r.application.effectiveNextAction,'needs_review','receiving is not proof of a requested action');
+ const a=r.application;r=await run(db,{action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:a.status,notes:'Eingang bestätigt',nextAction:'waiting'});
+ assert.equal(r.application.effectiveStatus,'replied');assert.equal(r.application.effectiveNextAction,'waiting');assert.equal(r.application.automaticNextAction,'needs_review');
+ assert.equal((await listApplications(db,'alice')).applications[0].effectiveNextAction,'waiting');
+ assert.equal((await getApplication(db,'alice',{applicationId:a.id})).application.notes,'Eingang bestätigt');
+});
+test('new incoming mail reopens review; duplicates, older imports and outgoing mail preserve an explicit decision',async()=>{
+ const {db}=database();const receipt=message({messageId:'a234567890abcdef',direction:'received',from:'office@example.org',to:'alice@example.org',occurredAt:'2026-09-22T07:30:00Z'});
+ let r=await imp(db,[receipt]);let a=r.application;
+ r=await run(db,{action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:'interview',notes:'Termin steht',nextAction:'done'});a=r.application;
+ r=await imp(db,[receipt]);assert.equal(r.application.nextAction,'done');assert.equal(r.application.revision,a.revision);
+ r=await imp(db,[{...receipt,messageId:'b234567890abcdef',occurredAt:'2026-07-01T11:00:00Z'}]);assert.equal(r.application.nextAction,'done');
+ r=await imp(db,[message({messageId:'c234567890abcdef',occurredAt:'2026-09-23T11:00:00Z'})]);assert.equal(r.application.nextAction,'done');
+ r=await imp(db,[{...receipt,messageId:'d234567890abcdef',occurredAt:'2026-09-24T11:00:00Z',body:'Bitte schicken Sie Ihren Lebenslauf.'}]);
+ assert.equal(r.application.nextAction,'automatic');assert.equal(r.application.effectiveNextAction,'needs_review');assert.equal(r.application.status,'interview');assert.equal(r.application.notes,'Termin steht');
+ a=r.application;r=await run(db,{action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:a.status,notes:a.notes,nextAction:'action_required'});
+ assert.equal(r.application.effectiveNextAction,'action_required');
+ // An outgoing message must not silently resolve an explicitly tracked task.
+ r=await imp(db,[message({messageId:'e234567890abcdef',occurredAt:'2026-09-25T11:00:00Z'})]);assert.equal(r.application.effectiveNextAction,'action_required');
+});
+test('action edits enforce owner/revision checks, and older clients preserve the existing action',async()=>{
+ const {db}=database();let r=await imp(db);let a=r.application;
+ const update={action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:a.status,notes:'Unterlagen senden',nextAction:'action_required'};
+ await assert.rejects(run(db,update,'bob'),e=>e.status===404);
+ r=await run(db,update);await assert.rejects(run(db,update),e=>e.status===409);a=r.application;
+ await assert.rejects(run(db,{...update,expectedRevision:a.revision,nextAction:'guessed'}));
+ r=await run(db,{action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:a.status,notes:'Notiz geändert'});
+ assert.equal(r.application.nextAction,'action_required');assert.equal(r.application.notes,'Notiz geändert');
+});
+test('a different incoming message at the same timestamp requires review while historical batches do not',async()=>{
+ const {db}=database();const receipt=message({messageId:'a234567890abcdef',direction:'received',from:'office@example.org',to:'alice@example.org',occurredAt:'2026-09-22T07:30:00Z'});
+ let r=await imp(db,[receipt]);let a=r.application;
+ r=await run(db,{action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:a.status,notes:'',nextAction:'waiting'});
+ r=await imp(db,[{...receipt,messageId:'b234567890abcdef',occurredAt:'2026-07-01T00:00:00Z'},{...receipt,messageId:'c234567890abcdef',occurredAt:'2026-07-02T00:00:00Z'}]);assert.equal(r.application.nextAction,'waiting');
+ r=await imp(db,[{...receipt,messageId:'d234567890abcdef'}]);assert.equal(r.application.effectiveNextAction,'needs_review');
+});
+test('a mixed batch does not reopen a decision for a reply followed by a newer outgoing message',async()=>{
+ const {db}=database();let r=await imp(db);const a=r.application;
+ await run(db,{action:'update_application',applicationId:a.id,expectedRevision:a.revision,status:a.status,notes:'Abgeschlossen',nextAction:'done'});
+ r=await imp(db,[message({messageId:'f234567890abcdef',direction:'received',from:'office@example.org',to:'alice@example.org',occurredAt:'2026-09-24T11:00:00Z'}),message({messageId:'e234567890abcdef',occurredAt:'2026-09-25T11:00:00Z'})]);
+ assert.equal(r.application.nextAction,'done');assert.equal(r.application.effectiveNextAction,'done');
+});

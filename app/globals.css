@@ -65,3 +65,19 @@ button,a,input{-webkit-tap-highlight-color:transparent}button{cursor:pointer}but
 
 .gmail-sync{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
 .gmail-sync small{font-size:11px;color:var(--muted-foreground);line-height:1.35}
+
+
+.application-badges{display:flex!important;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px;width:fit-content;max-width:100%}
+.application-badges .application-badge{margin:0;font-size:10px!important}
+.application-action-badge{display:inline-flex!important;align-items:center;gap:4px;width:fit-content;white-space:nowrap;padding:3px 7px;border-radius:6px;font-size:11px!important;line-height:1.4;font-weight:600;background:#edf0f5;color:#536078!important}
+.application-action-badge svg{flex:none}
+.application-action-badge.action-action_required{background:#fff0d9;color:#935416!important}
+.application-action-badge.action-needs_review{background:#f0eafb;color:#7652a4!important}
+.application-action-badge.action-waiting{background:#e8f1ff;color:#1762b7!important}
+.application-action-badge.action-done{background:#e6f4e9;color:#24693a!important}
+.application-badges .application-badge.status-replied{background:#eeeef3;color:#666672!important}
+.application-detail-link .application-badges{margin:0 0 0 auto;justify-content:flex-end}
+.application-detail-link .application-badge{margin:0}
+.application-action-editor{margin:0 0 16px}
+.application-action-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+.application-action-heading label{font-size:12px;color:var(--quiet)}

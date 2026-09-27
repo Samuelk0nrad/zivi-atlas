@@ -1,0 +1,1 @@
+ALTER TABLE `applications` ADD `next_action` text DEFAULT 'automatic' NOT NULL;
