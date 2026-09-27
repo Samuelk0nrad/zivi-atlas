@@ -21,5 +21,5 @@ export async function exportDraftMime(db:D1Database,bucket:R2Bucket|undefined,ow
   // A concurrent edit or attachment removal must not produce a mixed snapshot.
   const current=await getDraft(db,owner,{draftId});
   if(current.draft.revision!==draft.revision)throw conflict();
-  return {mime:buildDraftMime(draft,files),revision:draft.revision};
+  return {mime:buildDraftMime(draft,files),revision:draft.revision,owner};
 }

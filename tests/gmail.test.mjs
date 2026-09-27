@@ -23,7 +23,7 @@ test('Gmail upload contains the saved text and exact attachment bytes, using onl
     if(url.startsWith('/api/drafts/')){
       assert.equal(options.headers,undefined,'Google token must not be sent to Zivi Atlas');
       const exported=await exportDraftMime(db,bucket,'alice',{draftId:draft.id,expectedRevision:draft.revision});
-      return new Response(exported.mime,{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':String(exported.revision)}});
+      return new Response(exported.mime,{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':String(exported.revision),'X-Draft-Owner':exported.owner}});
     }
     assert.equal(url,'https://gmail.googleapis.com/gmail/v1/users/me/drafts');
     assert.equal(options.method,'POST');assert.equal(options.credentials,'omit');
@@ -35,7 +35,7 @@ test('Gmail upload contains the saved text and exact attachment bytes, using onl
     assert.deepEqual(parsed.files,[{name:'Lebenslauf – Österreich.pdf',sha256:createHash('sha256').update(bytes).digest('hex')}]);
     return Response.json({id:'draft-synthetic',message:{id:'message-synthetic'}});
   };
-  const copy=await createGmailCopy({accessToken:'synthetic-token',email:'alice+test@example.org'},draft,request);
+  const copy=await createGmailCopy({owner:'alice',accessToken:'synthetic-token',email:'alice+test@example.org'},draft,request);
   assert.equal(calls.length,2);assert.equal(copy.attachmentCount,1);assert.equal(copy.revision,2);assert.equal(copy.url,gmailDraftsUrl('alice+test@example.org'));
 });
 test('MIME handoff rejects another owner, stale revisions, and changes during attachment reads',async()=>{
@@ -48,7 +48,7 @@ test('MIME handoff rejects another owner, stale revisions, and changes during at
 test('failed or mismatched exports never upload to Gmail',async()=>{
   for(const response of [Response.json({error:'changed'},{status:409}),new Response('<html>sign in</html>',{headers:{'Content-Type':'text/html'}}),new Response('mime',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'3'}})]){
     let calls=0;
-    await assert.rejects(createGmailCopy({accessToken:'synthetic',email:'a@example.org'},{id:'draft',revision:2,attachments:[]},async()=>{calls++;return response;}));
+    await assert.rejects(createGmailCopy({owner:'alice',accessToken:'synthetic',email:'a@example.org'},{id:'draft',revision:2,attachments:[]},async()=>{calls++;return response;}));
     assert.equal(calls,1);
   }
 });
@@ -56,13 +56,13 @@ test('ambiguous Gmail failures are not retried and instruct the user to check Dr
   for(const failure of ['network','server','malformed','denied']){
     let posts=0;
     const request=async(url)=>{
-      if(url.startsWith('/api/'))return new Response('mime',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'1'}});
+      if(url.startsWith('/api/'))return new Response('mime',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'1','X-Draft-Owner':'alice'}});
       posts++;if(failure==='network')throw new Error('offline');
       if(failure==='server')return new Response('',{status:500});
       if(failure==='denied')return new Response('',{status:403});
       return Response.json({});
     };
-    await assert.rejects(createGmailCopy({accessToken:'synthetic',email:'a@example.org'},{id:'draft',revision:1,attachments:[]},request),e=>e instanceof GmailHandoffError&&e.uncertain===(failure!=='denied'));
+    await assert.rejects(createGmailCopy({owner:'alice',accessToken:'synthetic',email:'a@example.org'},{id:'draft',revision:1,attachments:[]},request),e=>e instanceof GmailHandoffError&&e.uncertain===(failure!=='denied'));
     assert.equal(posts,1);
   }
 });

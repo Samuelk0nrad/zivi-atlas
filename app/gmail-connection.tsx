@@ -1,9 +1,7 @@
 'use client';
-import {useEffect,useState} from 'react';
-import {GMAIL_SCOPE,GMAIL_EMAIL_SCOPE,type GmailSession} from '@/lib/gmail';
-
-type TokenResult={access_token?:string;scope?:string;error?:string};
-type GoogleOAuth={initTokenClient:(options:{client_id:string;scope:string;include_granted_scopes:boolean;callback:(value:TokenResult)=>void;error_callback:(value:{type:string})=>void})=>{requestAccessToken:(options:{prompt:string})=>void}};
+import {useEffect,useRef,useState} from 'react';
+import {type GmailSession} from '@/lib/gmail';
+import {createGmailAuthorization,type GoogleOAuth} from '@/lib/gmail-authorization';
 const googleOAuth=()=> (window as unknown as {google?:{accounts?:{oauth2?:GoogleOAuth}}}).google?.accounts?.oauth2;
 let scriptPromise:Promise<void>|undefined;
 function loadGoogle(){
@@ -20,33 +18,36 @@ function loadGoogle(){
 
 export function useGmailConnection(active:boolean){
   const[clientId,setClientId]=useState<string|null>(null),[loading,setLoading]=useState(false),[ready,setReady]=useState(false),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
+  const[account,setAccount]=useState<string|null>(null);
+  const connection=useRef<{key:string;auth:ReturnType<typeof createGmailAuthorization>}|null>(null);
   useEffect(()=>{
     if(!active)return;let cancelled=false;setLoading(true);setError('');setReady(false);
     void(async()=>{try{
-      const response=await fetch('/api/gmail/config',{cache:'no-store',signal:AbortSignal.timeout(15000)}),config=await response.json() as {clientId:string|null;error?:string};
+      const response=await fetch('/api/gmail/config',{cache:'no-store',signal:AbortSignal.timeout(15000)}),config=await response.json() as {clientId:string|null;owner:string;error?:string};
       if(!response.ok)throw new Error(config.error||'Gmail-Einrichtung nicht erreichbar.');
       if(cancelled)return;setClientId(config.clientId);
-      if(config.clientId){await loadGoogle();if(!cancelled)setReady(true);}
-    }catch(e){if(!cancelled)setError(e instanceof Error?e.message:'Google nicht erreichbar.');}
+      const key=JSON.stringify([config.clientId,config.owner]);
+      if(connection.current?.key!==key){connection.current=null;setAccount(null);}
+      if(config.clientId&&config.owner){
+        await loadGoogle();if(cancelled)return;
+        if(!connection.current){
+          let storage:Storage|undefined;try{storage=window.localStorage;}catch{}
+          connection.current={key,auth:createGmailAuthorization({clientId:config.clientId,owner:config.owner,oauth:googleOAuth()!,storage})};
+        }
+        setAccount(connection.current.auth.getAccount());setReady(true);
+      }
+    }catch(e){if(!cancelled){connection.current=null;setAccount(null);setError(e instanceof Error?e.message:'Google nicht erreichbar.');}}
     finally{if(!cancelled)setLoading(false);}})();
     return()=>{cancelled=true;};
   },[active,attempt]);
   // Called directly from the click handler, before any await: Google requires a user gesture.
-  const authorize=():Promise<GmailSession>=>new Promise((resolve,reject)=>{
-    const oauth=googleOAuth();if(!clientId||!oauth||!ready){reject(new Error('Gmail ist noch nicht eingerichtet.'));return;}
-    const client=oauth.initTokenClient({client_id:clientId,scope:`${GMAIL_SCOPE} ${GMAIL_EMAIL_SCOPE}`,include_granted_scopes:false,
-      error_callback:()=>reject(new Error('Google-Anmeldung geschlossen oder blockiert. Bitte Zivi Atlas in Chrome oder Brave öffnen und Pop-ups erlauben.')),
-      callback:result=>{void(async()=>{try{
-        if(result.error||!result.access_token)throw new Error('Gmail-Verbindung nicht freigegeben.');
-        if(!result.scope?.split(' ').includes(GMAIL_SCOPE))throw new Error('Bitte die Berechtigung zum Verwalten von Gmail-Entwürfen freigeben.');
-        const response=await fetch('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:`Bearer ${result.access_token}`},credentials:'omit',signal:AbortSignal.timeout(15000)});
-        const profile=await response.json() as {email?:string};
-        if(!response.ok||typeof profile.email!=='string'||!profile.email.includes('@'))throw new Error('Das ausgewählte Gmail-Konto konnte nicht ermittelt werden.');
-        resolve({accessToken:result.access_token,email:profile.email});
-      }catch(e){reject(e);}})();}
-    });client.requestAccessToken({prompt:'select_account'});
-  });
-  return{clientId,loading,ready,error,authorize,retry:()=>setAttempt(value=>value+1)};
+  const authorize=(switchAccount=false):Promise<GmailSession>=>{
+    const current=connection.current;if(!current||!ready)return Promise.reject(new Error('Gmail ist noch nicht eingerichtet.'));
+    return current.auth.authorize(switchAccount).then(session=>{if(connection.current===current)setAccount(session.email);return session;});
+  };
+  const forget=()=>{connection.current?.auth.forget();setAccount(null);};
+  const invalidate=()=>connection.current?.auth.invalidate();
+  return{clientId,loading,ready,error,account,authorize,forget,invalidate,retry:()=>setAttempt(value=>value+1)};
 }
 
 export function GmailSetup(){return <details className="gmail-setup"><summary>Gmail einmalig einrichten</summary><ol>
