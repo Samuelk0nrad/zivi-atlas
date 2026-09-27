@@ -15,14 +15,14 @@ export function PlaceRows({places,selectedId,onSelect}:{places:Place[];selectedI
   </button>)}</div>;
 }
 
-export function InstitutionResult({group,filters,selectedId,labels,application,saved,onOrganisation,onPlace,onLabels,onSave}:{group:PlaceGroup;filters:Filters;selectedId?:string;labels:InstitutionLabel[];application?:Application;saved:boolean;onOrganisation:(org:Organisation)=>void;onPlace:(place:Place)=>void;onLabels:(org:Organisation)=>void;onSave:(org:Organisation)=>void}){
+export function InstitutionResult({group,filters,selectedId,selectedOrganisationCode,labels,application,saved,onOrganisation,onPlace,onLabels,onSave}:{group:PlaceGroup;filters:Filters;selectedId?:string;selectedOrganisationCode?:number;labels:InstitutionLabel[];application?:Application;saved:boolean;onOrganisation:(org:Organisation)=>void;onPlace:(place:Place)=>void;onLabels:(org:Organisation)=>void;onSave:(org:Organisation)=>void}){
   const {org,places}=group;
   const [open,setOpen]=useState(places.length===1);
-  useEffect(()=>{if(selectedId&&places.some(place=>place.id===selectedId))setOpen(true);},[selectedId,places]);
+  useEffect(()=>{if(selectedOrganisationCode===org.code||(selectedId&&places.some(place=>place.id===selectedId)))setOpen(true);},[selectedId,selectedOrganisationCode,org.code,places]);
   const free=matchingSlots(org,filters).find(slot=>slot.available>0);
   const partial=places.length!==org.agencies.length;
   const count=partial?`${places.length} von ${org.agencies.length} Einsatzorten`:`${places.length} ${places.length===1?'Einsatzort':'Einsatzorte'}`;
-  return <Collapsible className="institution-result" open={open} onOpenChange={setOpen}>
+  return <Collapsible className={'institution-result'+(selectedOrganisationCode===org.code?' selected':'')} open={open} onOpenChange={setOpen}>
     <div className="institution-heading"><span className="card-category">{category(org)}</span><LabelInstitutionButton org={org} labeled={labels.length>0} onClick={onLabels}/><SaveInstitutionButton org={org} saved={saved} onSave={onSave}/></div>
     <button className="institution-overview" aria-label={`${org.title.trim()} – Einrichtung öffnen`} onClick={()=>onOrganisation(org)}>
       <span className="card-title"><h2>{org.title.trim()}</h2><ChevronRight size={18}/></span>
