@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+# Environment credentials take precedence. Keyring lookup is explicitly opt-in.
+keyring_value() {
+  if [ "${ZIVI_USE_KEYRING:-0}" = 1 ] && command -v secret-tool >/dev/null 2>&1; then
+    secret-tool lookup service "${ZIVI_KEYRING_SERVICE:-zivildienst-mcp-tunnel}" credential "$1" 2>/dev/null || true
+  fi
+}
+
+runtime_key="${CONTROL_PLANE_API_KEY:-$(keyring_value runtime)}"
+if [ -z "${ZIVI_AUTHORIZATION:-}" ]; then
+  app_token="${ZIVI_MCP_TOKEN:-$(keyring_value app-bearer)}"
+  if [ -n "$app_token" ]; then ZIVI_AUTHORIZATION="Bearer $app_token"; fi
+fi
+if [ -z "${ZIVI_SITES_AUTHORIZATION:-}" ]; then
+  site_token="${ZIVI_SITES_TOKEN:-$(keyring_value sites-bypass)}"
+  if [ -n "$site_token" ]; then ZIVI_SITES_AUTHORIZATION="Bearer $site_token"; fi
+fi
+if [ -z "$runtime_key" ] || [ -z "${ZIVI_AUTHORIZATION:-}" ]; then
+  echo 'Set CONTROL_PLANE_API_KEY and ZIVI_MCP_TOKEN (or ZIVI_AUTHORIZATION). Keyring fallback requires ZIVI_USE_KEYRING=1.' >&2
+  exit 1
+fi
+export CONTROL_PLANE_API_KEY="$runtime_key"
+export ZIVI_AUTHORIZATION
+export ZIVI_SITES_AUTHORIZATION="${ZIVI_SITES_AUTHORIZATION:-}"
+unset runtime_key app_token site_token
+exec "${TUNNEL_CLIENT:-tunnel-client}" "$@"

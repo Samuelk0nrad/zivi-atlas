@@ -1,0 +1,17 @@
+[Unit]
+Description=Zivi Atlas secure MCP tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace the checkout path. Keep the private profile and credentials outside Git.
+EnvironmentFile=%h/.config/zivi-atlas/tunnel.env
+ExecStart=/bin/sh /absolute/path/to/zivi-atlas/ops/zivildienst-tunnel run --profile zivildienst --profile-dir %h/.config/zivi-atlas
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
