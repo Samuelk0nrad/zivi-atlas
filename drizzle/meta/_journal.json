@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790425095268,
+      "tag": "0000_violet_texas_twister",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790429579132,
+      "tag": "0001_lazy_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790432632556,
+      "tag": "0002_petite_magma",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790440653807,
+      "tag": "0003_bouncy_hardball",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790443399490,
+      "tag": "0004_parallel_ben_parker",
+      "breakpoints": true
+    }
+  ]
+}
