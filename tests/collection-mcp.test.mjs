@@ -22,7 +22,7 @@ test('MCP discovery describes all collection actions and validates arguments bef
   const[clientTransport,serverTransport]=InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);await client.connect(clientTransport);
   try{
-    const{tools}=await client.listTools();assert.equal(tools.length,27);
+    const{tools}=await client.listTools();assert.equal(tools.length,28);
     assert.equal(tools.find(t=>t.name==='create_email_draft').annotations.idempotentHint,false);
     assert.equal(tools.find(t=>t.name==='get_email_draft').annotations.readOnlyHint,true);
     assert.equal(tools.find(t=>t.name==='delete_email_draft').annotations.destructiveHint,true);

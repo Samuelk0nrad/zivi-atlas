@@ -1,4 +1,4 @@
-import {GMAIL_SCOPE,GMAIL_EMAIL_SCOPE,type GmailSession} from './gmail';
+import {GMAIL_SCOPE,GMAIL_EMAIL_SCOPE,GMAIL_METADATA_SCOPE,type GmailSession} from './gmail';
 
 type TokenResult={access_token?:string;expires_in?:number|string;scope?:string;error?:string};
 type TokenRequest={prompt:string;login_hint?:string};
@@ -18,7 +18,7 @@ export function createGmailAuthorization({clientId,owner,oauth,storage,request=f
     if(!switchAccount&&session&&session.expiresAt>now()+60000)return Promise.resolve(session);
     const expectedEmail=switchAccount?null:email;
     const operation=new Promise<GmailSession>((resolve,reject)=>{
-      const client=oauth.initTokenClient({client_id:clientId,scope:`${GMAIL_SCOPE} ${GMAIL_EMAIL_SCOPE}`,include_granted_scopes:false,
+      const client=oauth.initTokenClient({client_id:clientId,scope:`${GMAIL_SCOPE} ${GMAIL_EMAIL_SCOPE} ${GMAIL_METADATA_SCOPE}`,include_granted_scopes:false,
         error_callback:()=>reject(new Error('Google-Anmeldung geschlossen oder blockiert. Bitte erneut versuchen.')),
         callback:result=>{void(async()=>{try{
           if(result.error||!result.access_token)throw new Error('Gmail-Verbindung nicht freigegeben.');
@@ -29,7 +29,7 @@ export function createGmailAuthorization({clientId,owner,oauth,storage,request=f
           if(!response.ok||!validEmail(profile.email))throw new Error('Das ausgewählte Gmail-Konto konnte nicht ermittelt werden.');
           // A login hint is only a hint: never silently upload to another account.
           if(expectedEmail&&profile.email.toLowerCase()!==expectedEmail.toLowerCase())throw new Error(`Bitte ${expectedEmail} verwenden oder „Konto wechseln“ wählen.`);
-          session={accessToken:result.access_token,email:profile.email,owner,expiresAt};email=profile.email;
+          session={accessToken:result.access_token,email:profile.email,owner,expiresAt,metadata:result.scope?.split(' ').includes(GMAIL_METADATA_SCOPE)};email=profile.email;
           try{storage?.setItem(key,email);}catch{}
           resolve(session);
         }catch(error){reject(error);}})();}
@@ -39,5 +39,5 @@ export function createGmailAuthorization({clientId,owner,oauth,storage,request=f
     });
     pending=operation.finally(()=>{pending=null;});return pending;
   };
-  return{authorize,invalidate,forget,getAccount:()=>email};
+  return{authorize,invalidate,forget,getAccount:()=>email,getSession:()=>session&&session.expiresAt>now()+60000?session:null};
 }

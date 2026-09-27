@@ -1,10 +1,11 @@
 import {applicationActionSchema,applicationGetSchema,applicationListSchema,type Application,type ApplicationEmail} from '../application-contract';
 import {type Organisation} from '../data';
+import {listDrafts,getDraft} from './drafts';
 import {CollectionError} from './collections';
 const columns=`a.id,a.org_code AS organisationCode,a.org_title AS organisationTitle,a.contact_email AS contactEmail,a.status,a.notes,a.revision,a.created_at AS createdAt,a.updated_at AS updatedAt,a.last_import_at AS lastImportAt,
  (SELECT COUNT(*) FROM application_emails e WHERE e.application_id=a.id) AS messageCount,
  (SELECT MAX(occurred_at) FROM application_emails e WHERE e.application_id=a.id) AS lastMessageAt,
- CASE WHEN a.status!='automatic' THEN a.status ELSE COALESCE((SELECT CASE direction WHEN 'sent' THEN 'sent' ELSE 'replied' END FROM application_emails e WHERE e.application_id=a.id ORDER BY occurred_at DESC,message_id DESC LIMIT 1),'planned') END AS effectiveStatus`;
+ CASE WHEN a.status!='automatic' THEN a.status WHEN COALESCE((SELECT MAX(sent_at) FROM email_drafts d WHERE d.owner_id=a.owner_id AND d.org_code=a.org_code AND d.state='sent'),'')>COALESCE((SELECT MAX(occurred_at) FROM application_emails e WHERE e.application_id=a.id),'') THEN 'sent' ELSE COALESCE((SELECT CASE direction WHEN 'sent' THEN 'sent' ELSE 'replied' END FROM application_emails e WHERE e.application_id=a.id ORDER BY occurred_at DESC,message_id DESC LIMIT 1),CASE WHEN EXISTS(SELECT 1 FROM email_drafts d WHERE d.owner_id=a.owner_id AND d.org_code=a.org_code AND d.state='sent') THEN 'sent' ELSE 'planned' END) END AS effectiveStatus`;
 export async function listApplications(db:D1Database,owner:string,input:unknown={}){
  const p=applicationListSchema.safeParse(input);if(!p.success)throw new CollectionError('Ungültige Bewerbungssuche.');
  const {results}=await db.prepare(`SELECT ${columns} FROM applications a WHERE owner_id=? ORDER BY COALESCE(lastMessageAt,a.updated_at) DESC,a.id LIMIT ? OFFSET ?`).bind(owner,p.data.limit,p.data.offset).all<Application>();
@@ -14,7 +15,9 @@ export async function getApplication(db:D1Database,owner:string,input:unknown){
  const p=applicationGetSchema.safeParse(input);if(!p.success)throw new CollectionError('Ungültige Bewerbung.');
  const application=await db.prepare(`SELECT ${columns} FROM applications a WHERE a.id=? AND owner_id=?`).bind(p.data.applicationId,owner).first<Application>();if(!application)throw new CollectionError('Bewerbung nicht gefunden.',404);
  const {results}=await db.prepare('SELECT id,source_account AS sourceAccount,message_id AS messageId,thread_id AS threadId,direction,occurred_at AS occurredAt,sender AS "from",recipients AS "to",cc,subject,body,body_truncated AS bodyTruncated,imported_at AS importedAt FROM application_emails WHERE application_id=? AND owner_id=? ORDER BY occurred_at DESC,message_id DESC LIMIT ? OFFSET ?').bind(application.id,owner,p.data.limit,p.data.offset).all<ApplicationEmail>();
- return {application,emailTotal:application.messageCount,offset:p.data.offset,emails:results.map(e=>({...e,bodyTruncated:!!e.bodyTruncated})),applicationUrl:`/?application=${application.id}`};
+ const archive=await listDrafts(db,owner,{organisationCode:application.organisationCode,state:'sent'});
+ const sentDrafts=await Promise.all(archive.drafts.map(async d=>(await getDraft(db,owner,{draftId:d.id})).draft));
+ return {sentDrafts,application,emailTotal:application.messageCount,offset:p.data.offset,emails:results.map(e=>({...e,bodyTruncated:!!e.bodyTruncated})),applicationUrl:`/?application=${application.id}`};
 }
 export async function mutateApplication(db:D1Database,owner:string,input:unknown,loadCatalog:()=>Promise<{content:Organisation[]}>){
  const p=applicationActionSchema.safeParse(input);if(!p.success)throw new CollectionError(p.error.issues[0]?.message||'Ungültige Bewerbung.');

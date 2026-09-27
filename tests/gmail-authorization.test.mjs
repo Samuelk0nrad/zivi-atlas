@@ -19,6 +19,7 @@ test('connecting once creates multiple drafts without reopening Google and store
   assert.deepEqual(f.prompts,[{prompt:'select_account'}]);f.grant();await first;
   let posts=0;
   const request=async(url,options)=>{
+    if(url==='/api/gmail/handoffs')return Response.json({id:'handoff',snapshotId:'snapshot'});
     if(url.startsWith('/api/'))return new Response('To: test@example.org\r\n\r\nSynthetic draft',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'1','X-Draft-Owner':'owner-one'}});
     assert.equal(options.headers.Authorization,'Bearer synthetic-token');posts++;return Response.json({id:`draft-${posts}`,message:{id:`message-${posts}`}});
   };
@@ -74,7 +75,8 @@ test('Gmail authorization rejection is explicit and never retries the draft writ
   for(const status of [401,403]){
     let posts=0;
     await assert.rejects(createGmailCopy({owner:'owner-one',accessToken:'synthetic',email:'alice@example.org'},{id:'test',revision:1,attachments:[]},async url=>{
-      if(url.startsWith('/api/'))return new Response('mime',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'1','X-Draft-Owner':'owner-one'}});
+      if(url==='/api/gmail/handoffs')return Response.json({id:'handoff',snapshotId:'snapshot'});
+    if(url.startsWith('/api/'))return new Response('mime',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'1','X-Draft-Owner':'owner-one'}});
       posts++;return new Response('',{status});
     }),error=>error instanceof GmailHandoffError&&error.reauthorize&&!error.uncertain);
     assert.equal(posts,1);
@@ -84,7 +86,8 @@ test('Gmail authorization rejection is explicit and never retries the draft writ
 
 test('a changed Atlas owner cannot transfer a draft with the previous Gmail connection',async()=>{
   let requests=0;
-  await assert.rejects(createGmailCopy({owner:'old-owner',accessToken:'synthetic',email:'alice@example.org'},{id:'test',revision:1,attachments:[]},async()=>{
+  await assert.rejects(createGmailCopy({owner:'old-owner',accessToken:'synthetic',email:'alice@example.org'},{id:'test',revision:1,attachments:[]},async(url)=>{
+    if(url==='/api/gmail/handoffs')return Response.json({id:'handoff',snapshotId:'snapshot'});
     requests++;return new Response('private MIME',{headers:{'Content-Type':'message/rfc822','X-Draft-Revision':'1','X-Draft-Owner':'new-owner'}});
   }),error=>error instanceof GmailHandoffError&&error.reauthorize&&/Atlas-Anmeldung/.test(error.message));
   assert.equal(requests,1,'no MIME or token should reach Google');

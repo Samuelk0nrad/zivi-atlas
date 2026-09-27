@@ -47,13 +47,13 @@ export function useGmailConnection(active:boolean){
   };
   const forget=()=>{connection.current?.auth.forget();setAccount(null);};
   const invalidate=()=>connection.current?.auth.invalidate();
-  return{clientId,loading,ready,error,account,authorize,forget,invalidate,retry:()=>setAttempt(value=>value+1)};
+  return{clientId,loading,ready,error,account,authorize,forget,invalidate,getSession:()=>connection.current?.auth.getSession()||null,retry:()=>setAttempt(value=>value+1)};
 }
 
 export function GmailSetup(){return <details className="gmail-setup"><summary>Gmail einmalig einrichten</summary><ol>
   <li>In der <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> ein Projekt anlegen und die Gmail API aktivieren.</li>
   <li>Unter Google Auth Platform „External“ und „Testing“ wählen und deine Gmail-Adresse als Testnutzer hinzufügen.</li>
-  <li>Unter „Data Access“ die Berechtigungen <code>gmail.compose</code> und <code>userinfo.email</code> hinzufügen.</li>
+  <li>Unter „Data Access“ die Berechtigungen <code>gmail.compose</code>, <code>gmail.metadata</code> und <code>userinfo.email</code> hinzufügen.</li>
   <li>Einen OAuth-Client vom Typ „Web application“ erstellen. Unter „Authorized JavaScript origins“ die Adresse dieser Website eintragen: <code>{typeof window!=='undefined'?window.location.origin:''}</code></li>
   <li>Die Client-ID für Zivi Atlas als <code>GOOGLE_GMAIL_CLIENT_ID</code> hinterlegen lassen. Kein Client-Secret erforderlich.</li>
   </ol><p>Google erlaubt mit dieser Berechtigung auch das Senden. Zivi Atlas erstellt ausschließlich Entwürfe. Die Verbindung bitte in Chrome oder Brave öffnen.</p></details>;}

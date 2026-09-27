@@ -62,3 +62,6 @@ button,a,input{-webkit-tap-highlight-color:transparent}button{cursor:pointer}but
 
 .gmail-setup{margin-top:12px;font-size:14px;line-height:1.5;color:var(--quiet)}.gmail-setup summary{cursor:pointer;color:var(--blue)}.gmail-setup ol{padding-left:20px;margin-top:10px}.gmail-setup li{margin:8px 0}.gmail-setup code{font-size:12px;overflow-wrap:anywhere;user-select:all}.gmail-setup a,.gmail-connection-error button{color:var(--blue)}.gmail-setup p{margin-top:10px}.gmail-connection-error{font-size:14px;margin-top:10px;color:#ad3c30}.gmail-connection-error button{background:none;border:0;font:inherit;padding:0}
 .gmail-account{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-top:12px;font-size:14px;color:var(--quiet)}.gmail-account span{flex:1 1 180px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gmail-account button{border:0;background:none;color:var(--blue);font:inherit;padding:5px 0}
+
+.gmail-sync{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.gmail-sync small{font-size:11px;color:var(--muted-foreground);line-height:1.35}

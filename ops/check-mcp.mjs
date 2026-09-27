@@ -9,7 +9,7 @@ const transport=new StreamableHTTPClientTransport(new URL(base+'/api/mcp'),{requ
 let createdId;
 try{
   await client.connect(transport);
-  const{tools}=await client.listTools();assert.equal(tools.length,27);
+  const{tools}=await client.listTools();assert.ok(tools.some(tool=>tool.name==='mark_email_draft_sent'),'Sent-tracking tool must be discoverable');
   const call=async(name,args={})=>{const r=await client.callTool({name,arguments:args});if(r.isError)throw new Error(r.content[0]?.text||'Tool failed');return r.structuredContent;};
   const before=await call('list_collections');assert.ok(Array.isArray(before.collections));
   if(writeCheck){

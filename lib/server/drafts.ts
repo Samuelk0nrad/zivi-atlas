@@ -3,13 +3,13 @@ import {type Organisation} from '../data';
 import {listAttachments,cleanupAttachments} from './draft-attachments';
 import {CollectionError} from './collections';
 
-const columns='id,org_code AS organisationCode,org_title AS organisationTitle,recipient,subject,revision,created_at AS createdAt,updated_at AS updatedAt';
+const columns='id,org_code AS organisationCode,org_title AS organisationTitle,recipient,subject,revision,created_at AS createdAt,updated_at AS updatedAt,state,sent_at AS sentAt';
 // SQLite lower() folds ASCII only; include German capitals in both operands.
 const searchFold=(sql:string)=>`lower(replace(replace(replace(replace(${sql},'Ä','ä'),'Ö','ö'),'Ü','ü'),'ẞ','ß'))`;
 export async function listDrafts(db:D1Database,owner:string,input:unknown={}){
   const parsed=draftListSchema.safeParse(input);if(!parsed.success)throw new CollectionError('Ungültige Entwurfssuche.');
-  const {organisationCode,query,limit,offset}=parsed.data,args:unknown[]=[owner];
-  let where='owner_id=?';if(organisationCode!==undefined){where+=' AND org_code=?';args.push(organisationCode);}
+  const {organisationCode,query,limit,offset,state}=parsed.data,args:unknown[]=[owner,state];
+  let where='owner_id=? AND state=?';if(organisationCode!==undefined){where+=' AND org_code=?';args.push(organisationCode);}
   if(query){where+=` AND instr(${searchFold("subject||' '||org_title||' '||recipient")},${searchFold('?')})>0`;args.push(query);}
   const {results}=await db.prepare(`SELECT ${columns} FROM email_drafts WHERE ${where} ORDER BY updated_at DESC,id LIMIT ? OFFSET ?`).bind(...args,limit,offset).all<DraftSummary>();
   const count=await db.prepare(`SELECT COUNT(*) AS total FROM email_drafts WHERE ${where}`).bind(...args).first<{total:number}>();
@@ -25,6 +25,7 @@ export async function getDraft(db:D1Database,owner:string,input:unknown){
 export async function mutateDraft(db:D1Database,owner:string,input:unknown,loadCatalog:()=>Promise<{content:Organisation[]}>,bucket?:R2Bucket){
   const parsed=draftActionSchema.safeParse(input);if(!parsed.success)throw new CollectionError(parsed.error.issues[0]?.message||'Ungültiger Entwurf.');
   const action=parsed.data,now=new Date().toISOString();
+  if(action.action==='mark_email_draft_sent'){const {markDraftSent}=await import('./gmail-handoffs');return markDraftSent(db,owner,action.draftId,action.expectedRevision);}
   if(action.action==='create_email_draft'){
     let org:Organisation|undefined;
     if(action.organisationCode!==undefined){org=(await loadCatalog()).content.find(o=>o.code===action.organisationCode);if(!org)throw new CollectionError('Einrichtung nicht gefunden. Bitte zuerst nach der Einrichtung suchen.');}
@@ -37,8 +38,16 @@ export async function mutateDraft(db:D1Database,owner:string,input:unknown,loadC
   }
   const statement=action.action==='delete_email_draft'
     ?db.prepare('DELETE FROM email_drafts WHERE id=? AND owner_id=? AND revision=?').bind(action.draftId,owner,action.expectedRevision)
-    :db.prepare('UPDATE email_drafts SET recipient=?,subject=?,body=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?').bind(action.recipient,action.subject,action.body,now,action.draftId,owner,action.expectedRevision);
-  const result=await statement.run();
+    :db.prepare('UPDATE email_drafts SET recipient=?,subject=?,body=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state=\'active\'').bind(action.recipient,action.subject,action.body,now,action.draftId,owner,action.expectedRevision);
+  let result:D1Result;
+  if(action.action==='delete_email_draft'){
+    const results=await db.batch([
+      db.prepare(`DELETE FROM email_drafts WHERE owner_id=? AND state='pending' AND id IN (SELECT snapshot_id FROM gmail_handoffs WHERE owner_id=? AND draft_id=?) AND EXISTS(SELECT 1 FROM email_drafts WHERE id=? AND owner_id=? AND revision=?)`).bind(owner,owner,action.draftId,action.draftId,owner,action.expectedRevision),
+      db.prepare(`DELETE FROM email_drafts WHERE owner_id=? AND state='archived' AND id IN (SELECT draft_id FROM gmail_handoffs WHERE owner_id=? AND snapshot_id=?) AND EXISTS(SELECT 1 FROM email_drafts WHERE id=? AND owner_id=? AND revision=?)`).bind(owner,owner,action.draftId,action.draftId,owner,action.expectedRevision),
+      db.prepare(`DELETE FROM email_drafts WHERE owner_id=? AND state='pending' AND id IN (SELECT snapshot_id FROM gmail_handoffs WHERE owner_id=? AND draft_id IN (SELECT draft_id FROM gmail_handoffs WHERE owner_id=? AND snapshot_id=?) AND NOT EXISTS(SELECT 1 FROM email_drafts source WHERE source.id=gmail_handoffs.draft_id AND source.state='active')) AND EXISTS(SELECT 1 FROM email_drafts WHERE id=? AND owner_id=? AND revision=?)`).bind(owner,owner,owner,action.draftId,action.draftId,owner,action.expectedRevision),
+      statement,
+    ]);result=results[3];
+  }else result=await statement.run();
   if(!result.meta.changes){
     const exists=await db.prepare('SELECT id FROM email_drafts WHERE id=? AND owner_id=?').bind(action.draftId,owner).first();
     throw new CollectionError(exists?'Dieser Entwurf wurde inzwischen geändert. Bitte die aktuelle Version laden; dein Text bleibt erhalten.':'Entwurf nicht gefunden.',exists?409:404);
